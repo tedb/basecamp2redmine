@@ -57,6 +57,20 @@ def truncate_name(name, length, ellipsis)
   name.size <= length ? name : name[0..length / 2 - 1] + ellipsis + name[-(length/2 - 2)..-1]
 end
 
+# Hack Nokogiri to escape our curly braces for us
+# This script delimits strings with curly braces so it's a little easier to think about quoting in our generated code
+module Nokogiri
+  module XML
+    class Node
+      alias :my_original_content :content
+      def content(*args)
+        # Escape { and } with \
+        my_original_content(*args).gsub(/\{|\}/, '\\\\\0')
+      end
+    end
+  end
+end
+
 src = []
 src << %{projects = {}}
 src << %{todo_lists = {}} # Todo lists are actually tasks that have sub-tasks --- was sub-projects
@@ -81,10 +95,10 @@ x.xpath('//project').each do |project|
   id = (project % 'id').content
   
   src << %{print "About to create project #{id} ('#{short_name}')..."}
-  src << %{  projects['#{id}'] = Project.new(:name => %{#{short_name}}, :description => "#{name} (Basecamp)", :identifier => "basecamp-p-#{id}")}
+  src << %{  projects['#{id}'] = Project.new(:name => %{#{short_name}}, :description => %{#{name} (Basecamp)}, :identifier => "basecamp-p-#{id}")}
   src << %{  projects['#{id}'].enabled_module_names = ['issue_tracking', 'boards']}
   src << %{  projects['#{id}'].trackers << BASECAMP_TRACKER}
-  src << %{  projects['#{id}'].boards << Board.new(:name => '#{short_name} (BC)', :description => "#{name}")}
+  src << %{  projects['#{id}'].boards << Board.new(:name => %{#{short_name} (BC)}, :description => %{#{name}})}
   src << %{  projects['#{id}'].save!}
   src << %{puts " Saved as Issue ID " + projects['#{id}'].id.to_s}
   
@@ -111,7 +125,7 @@ x.xpath('//todo-list').each do |todo_list|
 #  src << %{puts " Saved."}
 
   src << %{print "About to create todo-list #{id} ('#{name}') as Redmine issue under project #{parent_project_id}..."}
-  src << %{    todo_lists['#{id}'] = Issue.new :subject => '#{name}', :description => '#{description}'}
+  src << %{    todo_lists['#{id}'] = Issue.new :subject => %{#{name}}, :description => %{#{description}}}
                 #:created_on => bug.date_submitted,
                 #:updated_on => bug.last_updated
   #i.author = User.find_by_id(users_map[bug.reporter_id])
@@ -133,7 +147,7 @@ x.xpath('//todo-item').each do |todo_item|
   #completed_at = (todo_item % 'completed-at').content rescue nil
   
   src << %{print "About to create todo #{id} as Redmine sub-issue under issue #{parent_todo_list_id}..."}
-  src << %{    todos['#{id}'] = Issue.new :subject => '#{content[0..255]}', :description => '#{content}',
+  src << %{    todos['#{id}'] = Issue.new :subject => %{#{content[0..255]}}, :description => %{#{content}},
                 :created_on => '#{created_at}' }
                 #:completed_at => '#{completed_at}'
   #i.category = IssueCategory.find_by_project_id_and_name(i.project_id, bug.category[0,30]) unless bug.category.blank?
@@ -161,7 +175,7 @@ x.xpath('//post').each do |post|
   
   src << %{print "About to create post #{id} as Redmine message under project #{parent_project_id}..."}
   src << %{    messages['#{id}'] = Message.new :board => projects['#{parent_project_id}'].boards.first,
-                :subject => '#{title}', :content => %{#{body}\\n\\n-- \\n#{author_name}},
+                :subject => %{#{title}}, :content => %{#{body}\\n\\n-- \\n#{author_name}},
                 :created_on => '#{posted_on}', :author => AUTHOR }
                 #:completed_at => '#{completed_at}'
   #src << %{    messages['#{id}'].author = AUTHOR}
@@ -182,7 +196,7 @@ x.xpath('//post').each do |post|
     
     src << %{print "About to create post comment #{comment_id} as Redmine sub-message under project #{parent_project_id}..."}
     src << %{    comments['#{comment_id}'] = Message.new :board => projects['#{parent_project_id}'].boards.first,
-                  :subject => 'Re: #{title}', :content => %{#{comment_body}\\n\\n-- \\n#{comment_author_name}},
+                  :subject => %{Re: #{title}}, :content => %{#{comment_body}\\n\\n-- \\n#{comment_author_name}},
                   :created_on => '#{comment_created_at}', :author => AUTHOR, :parent => messages['#{id}'] }
     src << %{    comments['#{comment_id}'].save!}
     src << %{puts " Saved comment as Message ID " + comments['#{comment_id}'].id.to_s}
