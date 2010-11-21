@@ -26,6 +26,10 @@
 #
 # Author: Ted Behling <ted@tedb.us>
 # Available at http://gist.github.com/tedb
+# 
+# CHANGELOG
+# 2010-08-23 Initial public release
+# 2010-11-21 Applied bugfix to properly escape quotes
 #
 # Thanks to Tactio Interaction Design (www.tactio.com.br) for funding this work!
 #
