@@ -52,14 +52,18 @@
 require 'rubygems'
 require 'nokogiri'
 
-PROJECT_NAME_LENGTH = 30 - 5
+# These lengths came from the result of "cd redmine/app/models; grep 'validates_length_of' project.rb issue.rb message.rb board.rb"
+PROJECT_NAME_LENGTH = 30
+#BOARD_NAME_LENGTH is the same
+BOARD_DESCRIPTION_LENGTH = 255
+MESSAGE_SUBJECT_LENGTH = 255
+ISSUE_SUBJECT_LENGTH = 255
+
+ELLIPSIS = '...'
 TRACKER = 'Basecamp Todo'
+NAME_APPEND = ' (BC)'
 
 filename = ARGV[0] or raise ArgumentError, "Must have filename specified on command line"
-
-def truncate_name(name, length, ellipsis)
-  name.size <= length ? name : name[0..length / 2 - 1] + ellipsis + name[-(length/2 - 2)..-1]
-end
 
 # Hack Nokogiri to escape our curly braces for us
 # This script delimits strings with curly braces so it's a little easier to think about quoting in our generated code
@@ -71,6 +75,41 @@ module Nokogiri
         # Escape { and } with \
         my_original_content(*args).gsub(/\{|\}/, '\\\\\0')
       end
+    end
+  end
+end
+
+# Create several instance methods in String to handle multibyte strings,
+# using the Unicode support built into Ruby's regex library
+class MyString < String
+  # Get the first several *characters* from a string, respecting Unicode  
+  def my_left(chars)
+    raise ArgumentError 'arg must be a number' unless chars.is_a? Numeric
+    self.match(/^.{0,#{chars}}/u).to_s
+  end
+  
+  # Get the last several *characters* from a string, respecting Unicode
+  def my_right(chars)
+    raise ArgumentError 'arg must be a number' unless chars.is_a? Numeric
+    self.match(/.{0,#{chars}}$/u).to_s
+  end
+
+  def my_size
+    self.gsub(/./u, '.').size
+  end
+  
+  # Truncate a string from both sides, with an ellipsis in the middle
+  # This makes sense for this app, since names are often something like "Project 1, Issue XYZ" and "Project 1, Issue ABC";
+  # names are significant at the beginning and end of the string
+  def center_truncate(length, ellipsis = '...')
+    ellipsis = MyString.new(ellipsis)
+    
+    if self.my_size <= length
+      return self
+    else
+      left = self.my_left((length / 2.0).ceil - (ellipsis.my_size / 2.0).floor )
+      right = self.my_right((length / 2.0).floor - (ellipsis.my_size / 2.0).ceil )
+      return left + ellipsis + right
     end
   end
 end
@@ -95,14 +134,15 @@ src << %{begin}
 x = Nokogiri::XML(File.read filename)
 x.xpath('//project').each do |project|
   name = (project % 'name').content
-  short_name = truncate_name(name, PROJECT_NAME_LENGTH, '...')
+  short_name = MyString.new(name).center_truncate(PROJECT_NAME_LENGTH - NAME_APPEND.size, ELLIPSIS)
+  short_board_description = MyString.new(name).my_left(BOARD_DESCRIPTION_LENGTH)
   id = (project % 'id').content
   
-  src << %{print "About to create project #{id} ('#{short_name}')..."}
+  src << %{print "About to create project #{id} ('#{short_name}')."}
   src << %{  projects['#{id}'] = Project.new(:name => %{#{short_name}}, :description => %{#{name} (Basecamp)}, :identifier => "basecamp-p-#{id}")}
   src << %{  projects['#{id}'].enabled_module_names = ['issue_tracking', 'boards']}
   src << %{  projects['#{id}'].trackers << BASECAMP_TRACKER}
-  src << %{  projects['#{id}'].boards << Board.new(:name => %{#{short_name} (BC)}, :description => %{#{name}})}
+  src << %{  projects['#{id}'].boards << Board.new(:name => %{#{short_name}#{NAME_APPEND}}, :description => %{#{short_board_description}})}
   src << %{  projects['#{id}'].save!}
   src << %{puts " Saved as Issue ID " + projects['#{id}'].id.to_s}
   
@@ -112,7 +152,7 @@ end
 
 x.xpath('//todo-list').each do |todo_list|
   name = (todo_list % 'name').content
-  #short_name = truncate_name(name, PROJECT_NAME_LENGTH, '...')
+  short_name = MyString.new(name).center_truncate(ISSUE_SUBJECT_LENGTH, ELLIPSIS)
   id = (todo_list % 'id').content
   description = (todo_list % 'description').content
   parent_project_id = (todo_list % 'project-id').content
@@ -128,8 +168,8 @@ x.xpath('//todo-list').each do |todo_list|
 #  src << %{  projects['#{parent_project_id}'].save!}
 #  src << %{puts " Saved."}
 
-  src << %{print "About to create todo-list #{id} ('#{name}') as Redmine issue under project #{parent_project_id}..."}
-  src << %{    todo_lists['#{id}'] = Issue.new :subject => %{#{name}}, :description => %{#{description}}}
+  src << %{print "About to create todo-list #{id} ('#{short_name}') as Redmine issue under project #{parent_project_id}."}
+  src << %{    todo_lists['#{id}'] = Issue.new :subject => %{#{short_name}}, :description => %{#{description}}}
                 #:created_on => bug.date_submitted,
                 #:updated_on => bug.last_updated
   #i.author = User.find_by_id(users_map[bug.reporter_id])
@@ -144,14 +184,15 @@ end
 
 x.xpath('//todo-item').each do |todo_item|
   content = (todo_item % 'content').content
+  short_content = MyString.new(content).center_truncate(ISSUE_SUBJECT_LENGTH, ELLIPSIS)
   id = (todo_item % 'id').content
   parent_todo_list_id = (todo_item % 'todo-list-id').content
   complete = (todo_item % 'completed').content == 'true'
   created_at = (todo_item % 'created-at').content
   #completed_at = (todo_item % 'completed-at').content rescue nil
   
-  src << %{print "About to create todo #{id} as Redmine sub-issue under issue #{parent_todo_list_id}..."}
-  src << %{    todos['#{id}'] = Issue.new :subject => %{#{content[0..255]}}, :description => %{#{content}},
+  src << %{print "About to create todo #{id} as Redmine sub-issue under issue #{parent_todo_list_id}."}
+  src << %{    todos['#{id}'] = Issue.new :subject => %{#{short_content}}, :description => %{#{content}},
                 :created_on => '#{created_at}' }
                 #:completed_at => '#{completed_at}'
   #i.category = IssueCategory.find_by_project_id_and_name(i.project_id, bug.category[0,30]) unless bug.category.blank?
@@ -171,15 +212,17 @@ x.xpath('//post').each do |post|
   body.gsub!(/<\/div>/, "\n")
   body.gsub!(/<br ?\/?>/, "\n")
   
+  message_reply_prefix = 'Re: '
   title = (post % 'title').content
+  short_title = MyString.new(title).center_truncate(MESSAGE_SUBJECT_LENGTH - message_reply_prefix.size, ELLIPSIS)
   id = (post % 'id').content
   parent_project_id = (post % 'project-id').content
   author_name = (post % 'author-name').content
   posted_on = (post % 'posted-on').content
   
-  src << %{print "About to create post #{id} as Redmine message under project #{parent_project_id}..."}
+  src << %{print "About to create post #{id} as Redmine message under project #{parent_project_id}."}
   src << %{    messages['#{id}'] = Message.new :board => projects['#{parent_project_id}'].boards.first,
-                :subject => %{#{title}}, :content => %{#{body}\\n\\n-- \\n#{author_name}},
+                :subject => %{#{short_title}}, :content => %{#{body}\\n\\n-- \\n#{author_name}},
                 :created_on => '#{posted_on}', :author => AUTHOR }
                 #:completed_at => '#{completed_at}'
   #src << %{    messages['#{id}'].author = AUTHOR}
@@ -198,9 +241,9 @@ x.xpath('//post').each do |post|
     comment_author_name = (comment % 'author-name').content
     comment_created_at = (comment % 'created-at').content
     
-    src << %{print "About to create post comment #{comment_id} as Redmine sub-message under project #{parent_project_id}..."}
+    src << %{print "About to create post comment #{comment_id} as Redmine sub-message under project #{parent_project_id}."}
     src << %{    comments['#{comment_id}'] = Message.new :board => projects['#{parent_project_id}'].boards.first,
-                  :subject => %{Re: #{title}}, :content => %{#{comment_body}\\n\\n-- \\n#{comment_author_name}},
+                  :subject => %{#{message_reply_prefix}#{short_title}}, :content => %{#{comment_body}\\n\\n-- \\n#{comment_author_name}},
                   :created_on => '#{comment_created_at}', :author => AUTHOR, :parent => messages['#{id}'] }
     src << %{    comments['#{comment_id}'].save!}
     src << %{puts " Saved comment as Message ID " + comments['#{comment_id}'].id.to_s}
@@ -223,7 +266,7 @@ src << %{puts '[' + projects.values.map(&:id).map(&:to_s).join(',') + '].each   
 
 src << %{rescue => e}
 src << %{  file = e.backtrace.grep /\#{File.basename(__FILE__)}/}
-src << %{  puts "\\n\\nException was raised at \#{file}; deleting all imported projects..." }
+src << %{  puts "\\n\\nException was raised at \#{file}; deleting all imported projects." }
 
 #src << %{  journals.each_value do |j| j.destroy unless j.new_record?; end }
 #src << %{  todos.each_value do |t| t.destroy unless t.new_record?; end }
