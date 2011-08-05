@@ -13,6 +13,7 @@
 # You do not need to associate it with any existing projects.
 #
 #
+# DATABASE CORRECTION .sql files
 # Also, you may need to temporarily delete the following unique index on a join table
 # ALTER TABLE `projects_trackers` DROP INDEX `projects_trackers_unique`;
 #
@@ -43,7 +44,8 @@
 # CHANGELOG
 # 2010-08-23 Initial public release
 # 2010-11-21 Applied bugfix to properly escape quotes
-# 2011-08-05 Added methods MyString.clean() and MyString.cleanHtml() to do more string escaping (quotes, interprited special characters, etc)
+# 2011-08-05 Added methods MyString.clean() and MyString.cleanHtml() to do more string escaping (quotes, interprited special characters, etc) [alan]
+# 2011-08-05 Added logical controls for excluding various IDs from import, cleaned up the string cleanup functions, and added before/after SQL files [alan]
 #
 # Thanks to Tactio Interaction Design (www.tactio.com.br) for funding this work!
 #
@@ -76,6 +78,13 @@ ISSUE_SUBJECT_LENGTH = 255
 ELLIPSIS = '...'
 TRACKER = 'Basecamp Todo'
 NAME_APPEND = ' (BC)'
+
+# Exclude a few specific Posts by ID - <alan+basecamp2redmine@zeroasterisk.com> - 2011.08.04
+EXCLUDE_PPROJECT_IDS = [ "0", "1" ]
+EXCLUDE_TODO_LIST_IDS = [ "0", "1" ]
+EXCLUDE_TODO_IDS = [ "0", "1" ]
+EXCLUDE_POST_IDS = [ "0", "1", "12218933" ]
+
 
 filename = ARGV[0] or raise ArgumentError, "Must have filename specified on command line"
 
@@ -120,18 +129,20 @@ class MyString < String
     else
       left = self.my_left((length / 2.0).ceil - (ellipsis.my_size / 2.0).floor )
       right = self.my_right((length / 2.0).floor - (ellipsis.my_size / 2.0).ceil )
-      return left + ellipsis + right
+      return MyString.new(left + ellipsis + right)
     end
   end
   # Escape Other Charcters which have given me problems - <alan+basecamp2redmine@zeroasterisk.com> - 2011.08.04
   def clean()
-    return self.gsub(/\"/, '').gsub('\\C', '\\\\\\\\C').gsub('\\M', '\\\\\\\\M').gsub('s\\x', 's\\\\\\\\x').strip
+    string = self
+    return MyString.new(string.gsub(/\"/, '').gsub('\\C', '\\\\\\\\C').gsub('\\M', '\\\\\\\\M').gsub('s\\x', 's\\\\\\\\x').strip)
   end
   # Escape Other Charcters which have given me problems - <alan+basecamp2redmine@zeroasterisk.com> - 2011.08.04
   def cleanHTML()
-    self = self.gsub(/&lt;/, '<').gsub(/&gt;/, '>').gsub(/&amp;/, '&')
-    self = self.gsub(/<div[^>]*>/, '').gsub(/<\/div>/, "\n").gsub(/<br ?\/?>/, "\n")
-    return self.strip;
+    string = self
+    string = string.gsub(/&lt;/, '<').gsub(/&gt;/, '>').gsub(/&amp;/, '&')
+    string = string.gsub(/<div[^>]*>/, '').gsub(/<\/div>/, "\n").gsub(/<br ?\/?>/, "\n")
+    return MyString.new(string.strip);
   end
 end
 
@@ -160,16 +171,18 @@ x.xpath('//project').each do |project|
   short_board_description = MyString.new(name).my_left(BOARD_DESCRIPTION_LENGTH).clean()
   id = (project % 'id').content
   
-  src << %{print "About to create project #{id} ('#{short_name}')."}
-  src << %{  projects['#{id}'] = Project.new(:name => %{#{short_name}}, :description => %{#{name} (Basecamp)}, :identifier => "basecamp-p-#{id}")}
-  src << %{  projects['#{id}'].enabled_module_names = ['issue_tracking', 'boards']}
-  src << %{  projects['#{id}'].trackers << BASECAMP_TRACKER}
-  src << %{  projects['#{id}'].boards << Board.new(:name => %{#{short_name}#{NAME_APPEND}}, :description => %{#{short_board_description}})}
-  src << %{  projects['#{id}'].save!}
-  src << %{puts " Saved as Issue ID " + projects['#{id}'].id.to_s}
-  
-  # TODO add members to project with roles
-  # Member.create(:user => u, :project => @target_project, :roles => [role])
+  if !EXCLUDE_PPROJECT_IDS.include?(id)
+    src << %{print "About to create project #{id} ('#{short_name}')."}
+    src << %{  projects['#{id}'] = Project.new(:name => %{#{short_name}}, :description => %{#{name} (Basecamp)}, :identifier => "basecamp-p-#{id}")}
+    src << %{  projects['#{id}'].enabled_module_names = ['issue_tracking', 'boards']}
+    src << %{  projects['#{id}'].trackers << BASECAMP_TRACKER}
+    src << %{  projects['#{id}'].boards << Board.new(:name => %{#{short_name}#{NAME_APPEND}}, :description => %{#{short_board_description}})}
+    src << %{  projects['#{id}'].save!}
+    src << %{puts " Saved as Project ID " + projects['#{id}'].id.to_s}
+    
+    # TODO add members to project with roles
+    # Member.create(:user => u, :project => @target_project, :roles => [role])
+  end
 end
 
 x.xpath('//todo-list').each do |todo_list|
@@ -180,18 +193,22 @@ x.xpath('//todo-list').each do |todo_list|
   parent_project_id = (todo_list % 'project-id').content
   complete = (todo_list % 'complete').content == 'true'
   
-  src << %{print "About to create todo-list #{id} ('#{short_name}') as Redmine issue under project #{parent_project_id}."}
-  src << %{    todo_lists['#{id}'] = Issue.new :subject => %{#{short_name}}, :description => %{#{description}}}
-                #:created_on => bug.date_submitted,
-                #:updated_on => bug.last_updated
-  #i.author = User.find_by_id(users_map[bug.reporter_id])
-  #i.category = IssueCategory.find_by_project_id_and_name(i.project_id, bug.category[0,30]) unless bug.category.blank?
-  src << %{    todo_lists['#{id}'].status = #{complete} ? CLOSED_STATUS : DEFAULT_STATUS}
-  src << %{    todo_lists['#{id}'].tracker = BASECAMP_TRACKER}
-  src << %{    todo_lists['#{id}'].author = AUTHOR}
-  src << %{    todo_lists['#{id}'].project = projects['#{parent_project_id}']}
-  src << %{    todo_lists['#{id}'].save!}
-  src << %{puts " Saved as Issue ID " + todo_lists['#{id}'].id.to_s}
+  if !EXCLUDE_PPROJECT_IDS.include?(parent_project_id) && !EXCLUDE_TODO_LIST_IDS.include?(id)
+    src << %{print "About to create todo-list #{id} ('#{short_name}') as Redmine issue under project #{parent_project_id}."}
+    src << %{    todo_lists['#{id}'] = Issue.new :subject => %{#{short_name}}, :description => %{#{description} (Basecamp ToDoList# #{id})}}
+    #:created_on => bug.date_submitted,
+    #:updated_on => bug.last_updated
+    #i.author = User.find_by_id(users_map[bug.reporter_id])
+    #i.category = IssueCategory.find_by_project_id_and_name(i.project_id, bug.category[0,30]) unless bug.category.blank?
+    src << %{    todo_lists['#{id}'].status = #{complete} ? CLOSED_STATUS : DEFAULT_STATUS}
+    src << %{    todo_lists['#{id}'].tracker = BASECAMP_TRACKER}
+    src << %{    todo_lists['#{id}'].author = AUTHOR}
+    src << %{    todo_lists['#{id}'].project = projects['#{parent_project_id}']}
+    src << %{    todo_lists['#{id}'].save!}
+    src << %{puts " Saved as Issue ID " + todo_lists['#{id}'].id.to_s}
+  else
+    EXCLUDE_TODO_LIST_IDS[] = id
+  end
 end
 
 x.xpath('//todo-item').each do |todo_item|
@@ -203,18 +220,20 @@ x.xpath('//todo-item').each do |todo_item|
   created_at = (todo_item % 'created-at').content
   #completed_at = (todo_item % 'completed-at').content rescue nil
   
-  src << %{print "About to create todo #{id} as Redmine sub-issue under issue #{parent_todo_list_id}."}
-  src << %{    todos['#{id}'] = Issue.new :subject => %{#{short_content}}, :description => %{#{content}},
-                :created_on => '#{created_at}' }
-                #:completed_at => '#{completed_at}'
-  #i.category = IssueCategory.find_by_project_id_and_name(i.project_id, bug.category[0,30]) unless bug.category.blank?
-  src << %{    todos['#{id}'].status = #{complete} ? CLOSED_STATUS : DEFAULT_STATUS}
-  src << %{    todos['#{id}'].tracker = BASECAMP_TRACKER}
-  src << %{    todos['#{id}'].author = AUTHOR}
-  src << %{    todos['#{id}'].project = todo_lists['#{parent_todo_list_id}'].project}
-  src << %{    todos['#{id}'].parent_issue_id = todo_lists['#{parent_todo_list_id}'].id}
-  src << %{    todos['#{id}'].save!}
-  src << %{puts " Saved as Issue ID " + todos['#{id}'].id.to_s}
+  if !EXCLUDE_TODO_LIST_IDS.include?(parent_todo_list_id) && !EXCLUDE_TODO_IDS.include?(id)
+    src << %{print "About to create todo #{id} as Redmine sub-issue under issue #{parent_todo_list_id}."}
+    src << %{    todos['#{id}'] = Issue.new :subject => %{#{short_content}}, :description => %{#{content} (Basecamp ToDo# #{id})},
+                  :created_on => '#{created_at}' }
+                  #:completed_at => '#{completed_at}'
+    #i.category = IssueCategory.find_by_project_id_and_name(i.project_id, bug.category[0,30]) unless bug.category.blank?
+    src << %{    todos['#{id}'].status = #{complete} ? CLOSED_STATUS : DEFAULT_STATUS}
+    src << %{    todos['#{id}'].tracker = BASECAMP_TRACKER}
+    src << %{    todos['#{id}'].author = AUTHOR}
+    src << %{    todos['#{id}'].project = todo_lists['#{parent_todo_list_id}'].project}
+    src << %{    todos['#{id}'].parent_issue_id = todo_lists['#{parent_todo_list_id}'].id}
+    src << %{    todos['#{id}'].save!}
+    src << %{puts " Saved as Issue ID " + todos['#{id}'].id.to_s}
+  end
 end
 
 x.xpath('//post').each do |post|
@@ -227,29 +246,30 @@ x.xpath('//post').each do |post|
   author_name = MyString.new((post % 'author-name').content).clean()
   posted_on = (post % 'posted-on').content
   
-  src << %{print "About to create post #{id} as Redmine message under project #{parent_project_id}."}
-  src << %{    messages['#{id}'] = Message.new :board => projects['#{parent_project_id}'].boards.first,
-				:subject => %{#{short_title}}, :content => %{#{body}\\n\\n-- \\n#{author_name}},
-				:created_on => '#{posted_on}', :author => AUTHOR }
-				#:completed_at => '#{completed_at}'
-  #src << %{    messages['#{id}'].author = AUTHOR}
-  src << %{    messages['#{id}'].save!}
-  src << %{puts " Saved as Message ID " + messages['#{id}'].id.to_s}
-  
-  post.xpath('.//comment[commentable-type = "Post"]').each do |comment|
-	# Convert some HTML tags
-	comment_body = MyString.new((comment % 'body').content).clean().cleanHTML()
-	comment_id = (comment % 'id').content
-	parent_message_id = (comment % 'commentable-id').content
-	comment_author_name = MyString.new((comment % 'author-name').content).clean()
-	comment_created_at = (comment % 'created-at').content
-
-	src << %{print "About to create post comment #{comment_id} as Redmine sub-message under project #{parent_project_id}."}
-	src << %{    comments['#{comment_id}'] = Message.new :board => projects['#{parent_project_id}'].boards.first,
-				  :subject => %{#{message_reply_prefix}#{short_title}}, :content => %{#{comment_body}\\n\\n-- \\n#{comment_author_name}},
-				  :created_on => '#{comment_created_at}', :author => AUTHOR, :parent => messages['#{id}'] }
-	src << %{    comments['#{comment_id}'].save!}
-	src << %{puts " Saved comment as Message ID " + comments['#{comment_id}'].id.to_s}
+  if !EXCLUDE_PPROJECT_IDS.include?(parent_project_id) && !EXCLUDE_POST_IDS.include?(id)
+    src << %{print "About to create post #{id} as Redmine message under project #{parent_project_id}."}
+    src << %{    messages['#{id}'] = Message.new :board => projects['#{parent_project_id}'].boards.first,
+          :subject => %{#{short_title}}, :content => %{#{body}\\n\\n-- \\n#{author_name}},
+          :created_on => '#{posted_on}', :author => AUTHOR }
+          #:completed_at => '#{completed_at}'
+    #src << %{    messages['#{id}'].author = AUTHOR}
+    src << %{    messages['#{id}'].save!}
+    src << %{puts " Saved as Message ID " + messages['#{id}'].id.to_s}
+    
+    post.xpath('.//comment[commentable-type = "Post"]').each do |comment|
+      comment_body = MyString.new((comment % 'body').content).clean().cleanHTML()
+      comment_id = (comment % 'id').content
+      parent_message_id = (comment % 'commentable-id').content
+      comment_author_name = MyString.new((comment % 'author-name').content).clean()
+      comment_created_at = (comment % 'created-at').content
+    
+      src << %{print "About to create post comment #{comment_id} as Redmine sub-message under project #{parent_project_id}."}
+      src << %{    comments['#{comment_id}'] = Message.new :board => projects['#{parent_project_id}'].boards.first,
+              :subject => %{#{message_reply_prefix}#{short_title}}, :content => %{#{comment_body}\\n\\n-- \\n#{comment_author_name}},
+              :created_on => '#{comment_created_at}', :author => AUTHOR, :parent => messages['#{id}'] }
+      src << %{    comments['#{comment_id}'].save!}
+      src << %{puts " Saved comment as Message ID " + comments['#{comment_id}'].id.to_s}
+    end
   end
 end
 
