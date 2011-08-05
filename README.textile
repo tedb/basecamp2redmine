@@ -4,17 +4,17 @@ h2. Requirements
 
 Most of these requirements are in fact Redmine requirements:
 
-    apt-get install ruby rake rubygems1.8 libruby-extras build-essential
-    gem install mysql
-    gem install rails -v=2.3.11
-    gem install rack -v=1.1.0
-    gem install -v=0.4.2 i18n
-    # I'm using thin as a server, by the way
-    gem install thin 
+<pre><code>apt-get install ruby rake rubygems1.8 libruby-extras build-essential
+gem install mysql
+gem install rails -v=2.3.11
+gem install rack -v=1.1.0
+gem install -v=0.4.2 i18n
+### I'm using thin as a server, by the way ###
+gem install thin</code></pre>
 
 Specific requiements: You must install the Nokogiri gem, which is an XML parser:
 
-    sudo gem install nokogiri
+<pre><code>sudo gem install nokogiri</code></pre>
 
 This script is a "code generator", in that it writes a new Ruby script to STDOUT.
 This script contains invocations of Redmine's ActiveRecord models.
@@ -31,15 +31,15 @@ Obviously, you want to backup the entire database before making any changes.
 
 Also, you may need to temporarily delete the following unique index on a join table:
 
-    ALTER TABLE `projects_trackers` DROP INDEX `projects_trackers_unique`;
+<pre><code>ALTER TABLE `projects_trackers` DROP INDEX `projects_trackers_unique`;</code></pre>
 
-    Once you're finished with this import, you can get your unique values/keys with the following SQL statements:
+Once you're finished with this import, you can get your unique values/keys with the following SQL statements:
 
-    CREATE TABLE `projects_trackers_distinct` SELECT distinct * FROM `projects_trackers`;
-    TRUNCATE TABLE `projects_trackers`;
-    ALTER TABLE `projects_trackers` ADD UNIQUE KEY `projects_trackers_unique` (`project_id`,`tracker_id`);
-    INSERT INTO `projects_trackers` SELECT * FROM `projects_trackers_distinct`;
-    DROP TABLE `projects_trackers_distinct`
+<pre><code>CREATE TABLE `projects_trackers_distinct` SELECT distinct * FROM `projects_trackers`;
+TRUNCATE TABLE `projects_trackers`;
+ALTER TABLE `projects_trackers` ADD UNIQUE KEY `projects_trackers_unique` (`project_id`,`tracker_id`);
+INSERT INTO `projects_trackers` SELECT * FROM `projects_trackers_distinct`;
+DROP TABLE `projects_trackers_distinct`</code></pre>
 
 HINT: you may use the included before and after .sql files
 
@@ -54,35 +54,37 @@ h2. Running this script, creating the import file
 This script, if saved as filename basecamp2redmine.rb, can be invoked as follows.
 This will generate an ActiveRecord-based import script in the current directory, which should be the root directory of the Redmine installation.
 
-    ruby basecamp2redmine.rb my-basecamp-backup.xml > basecamp-import.rb
+<pre><code>ruby basecamp2redmine.rb my-basecamp-backup.xml > basecamp-import.rb</code></pre>
 
 You can edit the newly created file *basecamp-import.rb* or at least review it
 
-    script/runner -e development basecamp-import.rb
+<pre><code>script/runner -e development basecamp-import.rb</code></pre>
 
 The import process can be reversed by running:
 
-    ruby basecamp2redmine_undo.rb my-basecamp-backup.xml > basecamp-undo.rb
-    script/runner -e development basecamp-undo.rb
+<pre><code>ruby basecamp2redmine_undo.rb my-basecamp-backup.xml > basecamp-undo.rb
+script/runner -e development basecamp-undo.rb</code></pre>
 
 h2. About
 
-Author: Ted Behling <ted@tedb.us>
-Available at http://gist.github.com/tedb
-Fork at https://github.com/zeroasterisk/basecamp2redmine Author: Alan Blount <alan+basecamp2redmine@zeroasterisk.com>
+* Author: Ted Behling <ted@tedb.us>
+* Available at http://gist.github.com/tedb
+* Fork at https://github.com/zeroasterisk/basecamp2redmine Author: Alan Blount <alan+basecamp2redmine@zeroasterisk.com>
 
-CHANGELOG
-2010-08-23 Initial public release
-2010-11-21 Applied bugfix to properly escape quotes
-2011-08-05 Added methods MyString.clean() and MyString.cleanHtml() to do more string escaping (quotes, interprited special characters, etc) [alan]
-2011-08-05 Added logical controls for excluding various IDs from import, cleaned up the string cleanup functions, and added before/after SQL files [alan]
+h3. CHANGELOG
+
+* 2010-08-23 Initial public release
+* 2010-11-21 Applied bugfix to properly escape quotes
+* 2011-08-05 Added methods MyString.clean() and MyString.cleanHtml() to do more string escaping (quotes, interprited special characters, etc) [alan]
+* 2011-08-05 Added logical controls for excluding various IDs from import, cleaned up the string cleanup functions, and added before/after SQL files [alan]
 
 Thanks to Tactio Interaction Design (www.tactio.com.br) for funding this work!
 
 See MIT License below.  You are not required to provide the author with changes
 you make to this software, but it would be appreciated, as a courtesy, if it is possible.
 
-LEGAL NOTE:
+h4. LEGAL NOTE:
+
 The Basecamp name is a registered trademark of 37 Signals, LLC.  Use of this trademark
 is for reference only, and does not imply any relationship or affiliation with or endorsement
 from or by 37 Signals, LLC.
