@@ -7,10 +7,22 @@
 #
 # This script is a "code generator", in that it writes a new Ruby script to STDOUT.
 # This script contains invocations of Redmine's ActiveRecord models.  The resulting
-# "import script" can be edited before being executed, if desired. 
+# "import script" can be edited before being executed, if desired.
 #
 # Before running this script, you must create a Tracker inside Redmine called "Basecamp Todo".
 # You do not need to associate it with any existing projects.
+#
+#
+# Also, you may need to temporarily delete the following unique index on a join table
+# ALTER TABLE `projects_trackers` DROP INDEX `projects_trackers_unique`;
+#
+# Once you're finished with this import, you can get your unique values/keys with the following SQL statements
+# CREATE TABLE `projects_trackers_distinct` SELECT distinct * FROM `projects_trackers`;
+# TRUNCATE TABLE `projects_trackers`;
+# ALTER TABLE `projects_trackers` ADD UNIQUE KEY `projects_trackers_unique` (`project_id`,`tracker_id`);
+# INSERT INTO `projects_trackers` SELECT * FROM `projects_trackers_distinct`;
+# DROP TABLE `projects_trackers_distinct`
+#
 #
 # This script, if saved as filename basecamp2redmine.rb, can be invoked as follows.
 # This will generate an ActiveRecord-based import script in the current directory,
@@ -26,10 +38,12 @@
 #
 # Author: Ted Behling <ted@tedb.us>
 # Available at http://gist.github.com/tedb
-# 
+# Fork at https://github.com/zeroasterisk/basecamp2redmine # Author: Alan Blount <alan+basecamp2redmine@zeroasterisk.com>
+#
 # CHANGELOG
 # 2010-08-23 Initial public release
 # 2010-11-21 Applied bugfix to properly escape quotes
+# 2011-08-05 Added methods MyString.clean() and MyString.cleanHtml() to do more string escaping (quotes, interprited special characters, etc)
 #
 # Thanks to Tactio Interaction Design (www.tactio.com.br) for funding this work!
 #
@@ -65,6 +79,7 @@ NAME_APPEND = ' (BC)'
 
 filename = ARGV[0] or raise ArgumentError, "Must have filename specified on command line"
 
+
 # Hack Nokogiri to escape our curly braces for us
 # This script delimits strings with curly braces so it's a little easier to think about quoting in our generated code
 module Nokogiri
@@ -82,28 +97,24 @@ end
 # Create several instance methods in String to handle multibyte strings,
 # using the Unicode support built into Ruby's regex library
 class MyString < String
-  # Get the first several *characters* from a string, respecting Unicode  
+  # Get the first several *characters* from a string, respecting Unicode
   def my_left(chars)
     raise ArgumentError 'arg must be a number' unless chars.is_a? Numeric
     self.match(/^.{0,#{chars}}/u).to_s
   end
-  
   # Get the last several *characters* from a string, respecting Unicode
   def my_right(chars)
     raise ArgumentError 'arg must be a number' unless chars.is_a? Numeric
     self.match(/.{0,#{chars}}$/u).to_s
   end
-
   def my_size
     self.gsub(/./u, '.').size
   end
-  
   # Truncate a string from both sides, with an ellipsis in the middle
   # This makes sense for this app, since names are often something like "Project 1, Issue XYZ" and "Project 1, Issue ABC";
   # names are significant at the beginning and end of the string
   def center_truncate(length, ellipsis = '...')
     ellipsis = MyString.new(ellipsis)
-    
     if self.my_size <= length
       return self
     else
@@ -111,6 +122,16 @@ class MyString < String
       right = self.my_right((length / 2.0).floor - (ellipsis.my_size / 2.0).ceil )
       return left + ellipsis + right
     end
+  end
+  # Escape Other Charcters which have given me problems - <alan+basecamp2redmine@zeroasterisk.com> - 2011.08.04
+  def clean()
+    return self.gsub(/\"/, '').gsub('\\C', '\\\\\\\\C').gsub('\\M', '\\\\\\\\M').gsub('s\\x', 's\\\\\\\\x').strip
+  end
+  # Escape Other Charcters which have given me problems - <alan+basecamp2redmine@zeroasterisk.com> - 2011.08.04
+  def cleanHTML()
+    self = self.gsub(/&lt;/, '<').gsub(/&gt;/, '>').gsub(/&amp;/, '&')
+    self = self.gsub(/<div[^>]*>/, '').gsub(/<\/div>/, "\n").gsub(/<br ?\/?>/, "\n")
+    return self.strip;
   end
 end
 
@@ -132,10 +153,11 @@ src << %{AUTHOR = User.anonymous  #User.find 1}
 src << %{begin}
 
 x = Nokogiri::XML(File.read filename)
+
 x.xpath('//project').each do |project|
-  name = (project % 'name').content
-  short_name = MyString.new(name).center_truncate(PROJECT_NAME_LENGTH - NAME_APPEND.size, ELLIPSIS)
-  short_board_description = MyString.new(name).my_left(BOARD_DESCRIPTION_LENGTH)
+  name = MyString.new((project % 'name').content).clean()
+  short_name = MyString.new(name).center_truncate(PROJECT_NAME_LENGTH - NAME_APPEND.size, ELLIPSIS).clean()
+  short_board_description = MyString.new(name).my_left(BOARD_DESCRIPTION_LENGTH).clean()
   id = (project % 'id').content
   
   src << %{print "About to create project #{id} ('#{short_name}')."}
@@ -151,23 +173,13 @@ x.xpath('//project').each do |project|
 end
 
 x.xpath('//todo-list').each do |todo_list|
-  name = (todo_list % 'name').content
-  short_name = MyString.new(name).center_truncate(ISSUE_SUBJECT_LENGTH, ELLIPSIS)
+  name = MyString.new((todo_list % 'name').content).clean()
+  short_name = MyString.new(name).center_truncate(ISSUE_SUBJECT_LENGTH, ELLIPSIS).clean()
   id = (todo_list % 'id').content
-  description = (todo_list % 'description').content
+  description = MyString.new((todo_list % 'description').content).clean()
   parent_project_id = (todo_list % 'project-id').content
   complete = (todo_list % 'complete').content == 'true'
   
-# Commented because we don't want Todo Lists created as Sub-Projects.  Using Sub-Tasks instead.
-#  src << %{print "About to create todo-list #{id} ('#{short_name}') as sub-project of #{parent_project_id}..."}
-#  src << %{  todo_lists['#{id}'] = Project.new(:name => '#{short_name} (BC)', :description => "#{name}#{description.size > 0 ? "\n\n" + description : ''}", :identifier => "basecamp-tl-#{id}")}
-#  src << %{  todo_lists['#{id}'].enabled_module_names = ['issue_tracking']}
-#  src << %{  todo_lists['#{id}'].trackers << BASECAMP_TRACKER}
-#  src << %{  todo_lists['#{id}'].save!}
-#  src << %{  projects['#{parent_project_id}'].children << todo_lists['#{id}']}
-#  src << %{  projects['#{parent_project_id}'].save!}
-#  src << %{puts " Saved."}
-
   src << %{print "About to create todo-list #{id} ('#{short_name}') as Redmine issue under project #{parent_project_id}."}
   src << %{    todo_lists['#{id}'] = Issue.new :subject => %{#{short_name}}, :description => %{#{description}}}
                 #:created_on => bug.date_submitted,
@@ -183,8 +195,8 @@ x.xpath('//todo-list').each do |todo_list|
 end
 
 x.xpath('//todo-item').each do |todo_item|
-  content = (todo_item % 'content').content
-  short_content = MyString.new(content).center_truncate(ISSUE_SUBJECT_LENGTH, ELLIPSIS)
+  content = MyString.new((todo_item % 'content').content).clean()
+  short_content = MyString.new(content).center_truncate(ISSUE_SUBJECT_LENGTH, ELLIPSIS).clean()
   id = (todo_item % 'id').content
   parent_todo_list_id = (todo_item % 'todo-list-id').content
   complete = (todo_item % 'completed').content == 'true'
@@ -206,47 +218,38 @@ x.xpath('//todo-item').each do |todo_item|
 end
 
 x.xpath('//post').each do |post|
-  # Convert some HTML tags
-  body = (post % 'body').content.gsub(/&lt;/, '<').gsub(/&gt;/, '>').gsub(/&amp;/, '&')
-  body.gsub!(/<div[^>]*>/, '')
-  body.gsub!(/<\/div>/, "\n")
-  body.gsub!(/<br ?\/?>/, "\n")
-  
+  body = MyString.new((post % 'body').content).clean().cleanHTML()
   message_reply_prefix = 'Re: '
-  title = (post % 'title').content
+  title = MyString.new((post % 'title').content).clean().cleanHTML()
   short_title = MyString.new(title).center_truncate(MESSAGE_SUBJECT_LENGTH - message_reply_prefix.size, ELLIPSIS)
   id = (post % 'id').content
   parent_project_id = (post % 'project-id').content
-  author_name = (post % 'author-name').content
+  author_name = MyString.new((post % 'author-name').content).clean()
   posted_on = (post % 'posted-on').content
   
   src << %{print "About to create post #{id} as Redmine message under project #{parent_project_id}."}
   src << %{    messages['#{id}'] = Message.new :board => projects['#{parent_project_id}'].boards.first,
-                :subject => %{#{short_title}}, :content => %{#{body}\\n\\n-- \\n#{author_name}},
-                :created_on => '#{posted_on}', :author => AUTHOR }
-                #:completed_at => '#{completed_at}'
+				:subject => %{#{short_title}}, :content => %{#{body}\\n\\n-- \\n#{author_name}},
+				:created_on => '#{posted_on}', :author => AUTHOR }
+				#:completed_at => '#{completed_at}'
   #src << %{    messages['#{id}'].author = AUTHOR}
   src << %{    messages['#{id}'].save!}
   src << %{puts " Saved as Message ID " + messages['#{id}'].id.to_s}
   
   post.xpath('.//comment[commentable-type = "Post"]').each do |comment|
-    # Convert some HTML tags
-    comment_body = (comment % 'body').content.gsub(/&lt;/, '<').gsub(/&gt;/, '>').gsub(/&amp;/, '&')
-    comment_body.gsub!(/<div[^>]*>/, '')
-    comment_body.gsub!(/<\/div>/, "\n")
-    comment_body.gsub!(/<br ?\/?>/, "\n")
-    
-    comment_id = (comment % 'id').content
-    parent_message_id = (comment % 'commentable-id').content
-    comment_author_name = (comment % 'author-name').content
-    comment_created_at = (comment % 'created-at').content
-    
-    src << %{print "About to create post comment #{comment_id} as Redmine sub-message under project #{parent_project_id}."}
-    src << %{    comments['#{comment_id}'] = Message.new :board => projects['#{parent_project_id}'].boards.first,
-                  :subject => %{#{message_reply_prefix}#{short_title}}, :content => %{#{comment_body}\\n\\n-- \\n#{comment_author_name}},
-                  :created_on => '#{comment_created_at}', :author => AUTHOR, :parent => messages['#{id}'] }
-    src << %{    comments['#{comment_id}'].save!}
-    src << %{puts " Saved comment as Message ID " + comments['#{comment_id}'].id.to_s}
+	# Convert some HTML tags
+	comment_body = MyString.new((comment % 'body').content).clean().cleanHTML()
+	comment_id = (comment % 'id').content
+	parent_message_id = (comment % 'commentable-id').content
+	comment_author_name = MyString.new((comment % 'author-name').content).clean()
+	comment_created_at = (comment % 'created-at').content
+
+	src << %{print "About to create post comment #{comment_id} as Redmine sub-message under project #{parent_project_id}."}
+	src << %{    comments['#{comment_id}'] = Message.new :board => projects['#{parent_project_id}'].boards.first,
+				  :subject => %{#{message_reply_prefix}#{short_title}}, :content => %{#{comment_body}\\n\\n-- \\n#{comment_author_name}},
+				  :created_on => '#{comment_created_at}', :author => AUTHOR, :parent => messages['#{id}'] }
+	src << %{    comments['#{comment_id}'].save!}
+	src << %{puts " Saved comment as Message ID " + comments['#{comment_id}'].id.to_s}
   end
 end
 
