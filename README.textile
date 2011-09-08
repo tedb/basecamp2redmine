@@ -14,7 +14,8 @@ gem install thin</code></pre>
 
 Specific requiements: You must install the Nokogiri gem, which is an XML parser:
 
-<pre><code>sudo gem install nokogiri</code></pre>
+<pre><code>apt-get install libxslt-dev libxml2-dev
+sudo gem install nokogiri</code></pre>
 
 This script is a "code generator", in that it writes a new Ruby script to STDOUT.
 This script contains invocations of Redmine's ActiveRecord models.
