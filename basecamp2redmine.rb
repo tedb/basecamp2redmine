@@ -46,6 +46,7 @@
 # 2010-11-21 Applied bugfix to properly escape quotes
 # 2011-08-05 Added methods MyString.clean() and MyString.cleanHtml() to do more string escaping (quotes, interprited special characters, etc) [alan]
 # 2011-08-05 Added logical controls for excluding various IDs from import, cleaned up the string cleanup functions, and added before/after SQL files [alan]
+# 2011-09-08 Implemented better controls for inclusion/exclusion, Improved checking for existing Item before creation, Pulling in Firm as a Client [alan]
 #
 # Thanks to Tactio Interaction Design (www.tactio.com.br) for funding this work!
 #
@@ -81,19 +82,19 @@ NAME_APPEND = ' (BC)'
 
 # Include only a few specific Items by ID
 # keep empty if you want to include all (works in combination with EXCLUDE)
-INCLUDE_ONLY_CLIENT_IDS = [ "702222" ]
-INCLUDE_ONLY_PROJECT_IDS = [ "6993610", "702222" ]
+INCLUDE_ONLY_CLIENT_IDS = [] # eg: [ "1234" , "1235" ] 
+INCLUDE_ONLY_PROJECT_IDS = []
 INCLUDE_ONLY_TODO_LIST_IDS = []
 INCLUDE_ONLY_TODO_IDS = []
 INCLUDE_ONLY_POST_IDS = []
 # Exclude a few specific Posts by ID
 # keep empty if you want to include all (works in combination with INCLUDE_ONLY)
 ON_FAILURE_DELETE = false
-EXCLUDE_CLIENT_IDS = [ "0", "1" ]
-EXCLUDE_PPROJECT_IDS = [ "0", "1" ]
-EXCLUDE_TODO_LIST_IDS = [ "0", "1" ]
-EXCLUDE_TODO_IDS = [ "0", "1" ]
-EXCLUDE_POST_IDS = [ "0", "1", "12218933" ]
+EXCLUDE_CLIENT_IDS = [] # eg: [ "1234" , "1235" ]
+EXCLUDE_PPROJECT_IDS = []
+EXCLUDE_TODO_LIST_IDS = []
+EXCLUDE_TODO_IDS = []
+EXCLUDE_POST_IDS = []
 BASECAMP_PARENT_PROJECT_ID = 1 # nil
 BASECAMP_COMPANY_NAME_AS_PARENT_PROJECT = true
 BASECAMP_COMPANY_NAME_PROJECT_PREFIX = "Basecamp: "
